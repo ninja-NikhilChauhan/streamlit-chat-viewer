@@ -1,18 +1,64 @@
 import streamlit as st
 import pandas as pd
+import os
+import glob
 
-# Load data
+# Directory to store the uploaded CSV
+DUMP_DIR = "csv_dump"
+if not os.path.exists(DUMP_DIR):
+    os.makedirs(DUMP_DIR)
+
+st.set_page_config(page_title="Chat Viewer", layout="centered")
+st.title("Chat Sessions Viewer")
+
+# File Uploader
+uploaded_file = st.file_uploader("Upload Chat CSV Dump", type=['csv'])
+
+if uploaded_file is not None:
+    # Clear the existing files in the directory
+    existing_files = glob.glob(os.path.join(DUMP_DIR, "*.csv"))
+    for f in existing_files:
+        os.remove(f)
+    
+    # Save the new file
+    file_path = os.path.join(DUMP_DIR, uploaded_file.name)
+    with open(file_path, "wb") as f:
+        f.write(uploaded_file.getbuffer())
+    
+    # Clear cache to ensure fresh data is loaded
+    st.cache_data.clear()
+    
+    # Reset session states
+    if 'current_date' in st.session_state:
+        del st.session_state['current_date']
+    if 'current_index' in st.session_state:
+        del st.session_state['current_index']
+
+# Check if there is any CSV in csv_dump to read
+existing_files = glob.glob(os.path.join(DUMP_DIR, "*.csv"))
+if not existing_files:
+    st.info("Please upload a CSV file to view chat sessions.")
+    st.stop()
+
+# Use the only CSV present in the folder
+file_path = existing_files[0]
+st.success(f"Reading data from: `{os.path.basename(file_path)}`")
+
+# Load data function
 @st.cache_data
-def load_data():
-    file_path = 'support_bot___chat_dump___modified_2026-05-01T11_53_55.486115709+05_30.csv'
-    df = pd.read_csv(file_path)
+def load_data(path):
+    df = pd.read_csv(path)
     # Sort the dataframe by ai_chat_id and then message_id to ensure order
-    df = df.sort_values(by=['ai_chat_id', 'message_id'], ascending=[True, True])
+    if 'ai_chat_id' in df.columns and 'message_id' in df.columns:
+        df = df.sort_values(by=['ai_chat_id', 'message_id'], ascending=[True, True])
     
     # Parse the dates from actual_created_at
-    # Example format: "30 Apr, 2026, 10:13 AM"
-    df['parsed_datetime'] = pd.to_datetime(df['actual_created_at'], errors='coerce')
-    df['date'] = df['parsed_datetime'].dt.date
+    if 'actual_created_at' in df.columns:
+        df['parsed_datetime'] = pd.to_datetime(df['actual_created_at'], errors='coerce')
+        df['date'] = df['parsed_datetime'].dt.date
+    else:
+        st.error("Column 'actual_created_at' not found in the CSV.")
+        st.stop()
     
     # Map each ai_chat_id to its first date (min date)
     chat_date_map = df.groupby('ai_chat_id')['date'].min().reset_index()
@@ -23,17 +69,13 @@ def load_data():
     
     return df, chat_date_map
 
-# Main app
-st.set_page_config(page_title="Chat Viewer", layout="centered")
-st.title("Chat Sessions Viewer")
-
 try:
-    df, chat_date_map = load_data()
+    df, chat_date_map = load_data(file_path)
 except Exception as e:
     st.error(f"Error loading the CSV file: {e}")
     st.stop()
 
-# Get unique dates and sort them descending (newest first) or ascending
+# Get unique dates and sort them
 unique_dates = sorted(chat_date_map['date'].unique())
 
 if len(unique_dates) == 0:
@@ -105,16 +147,16 @@ session_df = df[df['ai_chat_id'] == current_chat_id]
 
 # Information about the session
 if not session_df.empty:
-    cp_name = session_df['cp_name'].iloc[0]
-    user_id = session_df['user_id'].iloc[0]
+    cp_name = session_df['cp_name'].iloc[0] if 'cp_name' in session_df.columns else "Unknown"
+    user_id = session_df['user_id'].iloc[0] if 'user_id' in session_df.columns else "Unknown"
     st.caption(f"**User ID:** {user_id} | **Course/Program:** {cp_name}")
 
 st.markdown("---")
 
 for index, row in session_df.iterrows():
-    sender = str(row['sender_type']).lower().strip()
-    content = row['message_content']
-    time = row['actual_created_at']
+    sender = str(row['sender_type']).lower().strip() if 'sender_type' in row else 'user'
+    content = row['message_content'] if 'message_content' in row else ''
+    time = row['actual_created_at'] if 'actual_created_at' in row else ''
     
     # Render with Streamlit chat elements
     if sender == 'user':
