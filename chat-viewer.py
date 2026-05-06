@@ -48,16 +48,17 @@ st.success(f"Reading data from: `{os.path.basename(file_path)}`")
 @st.cache_data
 def load_data(path):
     df = pd.read_csv(path)
-    # Sort the dataframe by ai_chat_id and then message_id to ensure order
-    if 'ai_chat_id' in df.columns and 'message_id' in df.columns:
-        df = df.sort_values(by=['ai_chat_id', 'message_id'], ascending=[True, True])
+    # Sort the dataframe by ai_chat_id and then message_number or message_id to ensure order
+    sort_column = 'message_number' if 'message_number' in df.columns else 'message_id'
+    if 'ai_chat_id' in df.columns and sort_column in df.columns:
+        df = df.sort_values(by=['ai_chat_id', sort_column], ascending=[True, True])
     
-    # Parse the dates from actual_created_at
-    if 'actual_created_at' in df.columns:
-        df['parsed_datetime'] = pd.to_datetime(df['actual_created_at'], errors='coerce')
+    # Parse the dates from created_at
+    if 'created_at' in df.columns:
+        df['parsed_datetime'] = pd.to_datetime(df['created_at'], errors='coerce')
         df['date'] = df['parsed_datetime'].dt.date
     else:
-        st.error("Column 'actual_created_at' not found in the CSV.")
+        st.error("Column 'created_at' not found in the CSV.")
         st.stop()
     
     # Map each ai_chat_id to its first date (min date)
@@ -149,14 +150,15 @@ session_df = df[df['ai_chat_id'] == current_chat_id]
 if not session_df.empty:
     cp_name = session_df['cp_name'].iloc[0] if 'cp_name' in session_df.columns else "Unknown"
     user_id = session_df['user_id'].iloc[0] if 'user_id' in session_df.columns else "Unknown"
-    st.caption(f"**User ID:** {user_id} | **Course/Program:** {cp_name}")
+    rm_name = session_df['rm_name'].iloc[0] if 'rm_name' in session_df.columns else "Unknown"
+    st.caption(f"**User ID:** {user_id} | **Course/Program:** {cp_name} | **RM Name:** {rm_name}")
 
 st.markdown("---")
 
 for index, row in session_df.iterrows():
     sender = str(row['sender_type']).lower().strip() if 'sender_type' in row else 'user'
     content = row['message_content'] if 'message_content' in row else ''
-    time = row['actual_created_at'] if 'actual_created_at' in row else ''
+    time = row['parsed_datetime'].strftime('%H:%M') if pd.notna(row['parsed_datetime']) else ''
     
     # Render with Streamlit chat elements
     if sender == 'user':
