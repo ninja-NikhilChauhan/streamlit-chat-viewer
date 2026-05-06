@@ -61,9 +61,16 @@ def load_data(path):
         st.error("Column 'created_at' not found in the CSV.")
         st.stop()
     
-    # Map each ai_chat_id to its first date (min date)
-    chat_date_map = df.groupby('ai_chat_id')['date'].min().reset_index()
-    chat_date_map = chat_date_map.dropna()
+    # Map each ai_chat_id to its first date and rm_name
+    agg_funcs = {'date': 'min'}
+    if 'rm_name' in df.columns:
+        agg_funcs['rm_name'] = 'first'
+        
+    chat_date_map = df.groupby('ai_chat_id').agg(agg_funcs).reset_index()
+    if 'rm_name' not in chat_date_map.columns:
+        chat_date_map['rm_name'] = 'Unknown'
+        
+    chat_date_map = chat_date_map.dropna(subset=['date'])
     
     # Ensure df is cleaned of NaT dates if any
     df = df.dropna(subset=['date'])
@@ -76,34 +83,46 @@ except Exception as e:
     st.error(f"Error loading the CSV file: {e}")
     st.stop()
 
+# Add RM Name Filter
+unique_rms = ["All RMs"] + sorted([str(rm) for rm in chat_date_map['rm_name'].unique() if pd.notna(rm)])
+selected_rm = st.selectbox("Filter by RM Name", unique_rms)
+
+if selected_rm != "All RMs":
+    filtered_map = chat_date_map[chat_date_map['rm_name'] == selected_rm]
+else:
+    filtered_map = chat_date_map
+
 # Get unique dates and sort them
-unique_dates = sorted(chat_date_map['date'].unique())
+unique_dates = sorted(filtered_map['date'].unique())
 
 if len(unique_dates) == 0:
-    st.warning("No dates found.")
+    st.warning("No dates found for the selected criteria.")
     st.stop()
 
 # Date selection dropdown
 selected_date = st.selectbox("Select Date", unique_dates, format_func=lambda x: x.strftime('%d %b, %Y'))
 
-# Filter chat IDs by the selected date
-date_chat_ids = chat_date_map[chat_date_map['date'] == selected_date]['ai_chat_id'].unique()
+# Filter chat IDs by the selected date AND RM
+date_chat_ids = filtered_map[filtered_map['date'] == selected_date]['ai_chat_id'].unique()
 
 if len(date_chat_ids) == 0:
     st.warning(f"No chat sessions found for {selected_date.strftime('%d %b, %Y')}.")
     st.stop()
 
 # Initialize session states
+if 'current_rm' not in st.session_state:
+    st.session_state.current_rm = selected_rm
 if 'current_date' not in st.session_state:
     st.session_state.current_date = selected_date
     st.session_state.current_index = 0
 
-# If the user changed the date, reset the index to 0
-if st.session_state.current_date != selected_date:
+# If the user changed the RM or the date, reset the index to 0
+if st.session_state.current_rm != selected_rm or st.session_state.current_date != selected_date:
+    st.session_state.current_rm = selected_rm
     st.session_state.current_date = selected_date
     st.session_state.current_index = 0
 
-# Bound index just in case the new date has fewer chats
+# Bound index just in case the new date/RM has fewer chats
 if st.session_state.current_index >= len(date_chat_ids):
     st.session_state.current_index = 0
 
